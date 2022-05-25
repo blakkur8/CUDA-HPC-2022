@@ -1,7 +1,7 @@
 # CUDA-HPC-2022
 
-1. compile the program
-2. run the program ./final_cuda <upper limit> (eg. 256 or 4096) need to be 2 in the power of something, allowed (2^8, 2^9, 2^10, ..., 2^n)
+1. compile the program nvcc `cuda_brute_force.cu -o cuda_brute_force`
+2. run the program `./cuda_brute_force <upper limit>` (eg. 256 or 4096) need to be 2 in the power of something, allowed (2^8, 2^9, 2^10, ..., 2^n)
 3. profit
 
 ### Parameter
