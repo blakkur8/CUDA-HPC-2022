@@ -7,7 +7,6 @@
 #define results_size iterations * iterations * iterations
 #define frequencies_group_by_size iterations * iterations * iterations * 2
 
-
 struct Offset {
     int x;
     int y;
@@ -28,7 +27,7 @@ __global__ void add_kernel(unsigned int *results,  int x_offset, int y_offset, i
 
     // thread_array is an independent part of the results array for each thread that each thread can use,
     // to prevent race conditions.
-    
+
     // All CUDA cores uses the same 1D array, but each core needs to have it own index-range in the array,
     // the core is the only one that can modify that part of the array.
     // Each result in the array is followed by its frequncy
@@ -43,14 +42,14 @@ __global__ void add_kernel(unsigned int *results,  int x_offset, int y_offset, i
 
     for (int k=0; k < iterations; k++) {
         z = k + (z_offset * iterations);
-        
+
         // The function the is being computed
         result = (x & y) ^ ((!x) & z);
 
 
         for (int l=0; l <= next_free_index; l++) {
             if (l == next_free_index) {
-                // First instance of the result 
+                // First instance of the result
 
                 next_free_index ++;
 
@@ -118,7 +117,7 @@ __global__ void merge_threads_arrays(unsigned int *frequencies_group_by_threads,
                 } else if(block_frequencies[ii * 2] == result) {
 
                     // The result exits
-                    
+
                     block_frequencies[ii * 2 + 1] += result_frequency;
                     break;
                 }
@@ -137,10 +136,20 @@ int start_brute_force (int *results, unsigned int *frequencies, int inner_iterat
     unsigned int *cuda_block_frequencies_count = nullptr;
 
     unsigned int *frequencies_count = (unsigned int *) malloc(frequencies_group_by_size * sizeof(int));
-    unsigned int *frequencies_group_by_blocks = (unsigned int*) malloc(frequencies_group_by_size* sizeof(int));
+    unsigned int *frequencies_group_by_blocks = (unsigned int*) malloc(frequencies_group_by_size * sizeof(int));
 
-    cudaMalloc((void **) &cuda_frequencies_count, frequencies_group_by_size * sizeof(int));
-    cudaMalloc((void **) &cuda_block_frequencies_count, frequencies_group_by_size * sizeof(int));
+    if (frequencies_count == nullptr || frequencies_group_by_blocks == nullptr) {
+        printf("malloc faild in start_brute_force \n");
+        exit(-1);
+    }
+
+    int cuda_malloc_status_1 = cudaMalloc((void **) &cuda_frequencies_count, frequencies_group_by_size * sizeof(int));
+    int cuda_malloc_status_2 = cudaMalloc((void **) &cuda_block_frequencies_count, frequencies_group_by_size * sizeof(int));
+
+    if (cuda_malloc_status_1 != 0 || cuda_malloc_status_2 != 0) {
+        printf("Cuda malloc faild \n");
+        exit(-1);
+    }
 
     Offset offset;
 
@@ -174,7 +183,6 @@ int start_brute_force (int *results, unsigned int *frequencies, int inner_iterat
 
                 // Merge each block array to a single result array
                 for (int block_index=0; block_index < iterations; block_index++) {
-
                     current_block = frequencies_group_by_blocks + (block_index * iterations * iterations * 2);
                     for (int i=0; i < iterations * iterations; i++){
                         result = current_block[i * 2];
@@ -182,7 +190,7 @@ int start_brute_force (int *results, unsigned int *frequencies, int inner_iterat
 
                         // If frequency is 0 there are no more result left in the current block
                         if(result_frequency == 0) break;
-                        
+
                         // Sum all results by index as the result and value as frequency
                         frequencies[result] += result_frequency;
                     }
@@ -200,47 +208,83 @@ int start_brute_force (int *results, unsigned int *frequencies, int inner_iterat
 
 
 int main(int argc, char * argv[]) {
-    int N = atoi(argv[1]);
+    /*
+        - r: only print results
+    */
 
+    unsigned int end_number = 0;
     unsigned int start_number = 0;
-    unsigned int end_number = N;
+    char raw_output = 0;
+
+    for (int i=0; i < argc; i++) {
+
+        if(i == 1 && atoi(argv[i]) != 0) {
+            end_number = atoi(argv[i]);
+        }
+
+        if(!strcmp(argv[i], "-r")) {
+            raw_output = 1; // TRUE
+        }
+    }
+
+    if (end_number == 0) {
+        printf("No value provided, default value is used 256 \n\n");
+        end_number = 256;
+    }
+
     unsigned int range_size = end_number - start_number;
 
     // For timing the program
     clock_t start, end;
     double run_time;
-    
-    
-    // Each CUDA iterations can run maxmium of N=256 times. 
+
+    // Each CUDA iterations can run maxmium of N=256 times.
     // For number N > 256 it needs to run x iterations for each parameter (i, j, k).
-    // where inner_iterations = x. 
+    // where inner_iterations = x.
     int inner_iterations = range_size / iterations;
 
     int *results = (int *) malloc(results_size * sizeof(int));
-    unsigned int *frequencies = (unsigned int *) malloc(4294967296 * sizeof(int));
+    unsigned int *frequencies = (unsigned int *) malloc(range_size * sizeof(int));
+    if (!raw_output) {
+        printf("Number range %u - %u \n", start_number, end_number);
+    }
+
+    if(results == nullptr || frequencies == nullptr) {
+        // Malloc faild
+        printf("Malloc faild \n");
+        exit(-1);
+    }
 
     // For timing
     start = clock();
 
     start_brute_force(results, frequencies, inner_iterations);
-    
+
     // For timing
     end = clock();
     run_time = ((double) (end - start)) / CLOCKS_PER_SEC;
 
-    unsigned long long int temp_count = 0;
+    size_t temp_count = 0;
 
     // Prints out the frequency of each results
     for (int i=0; i < range_size; i++) {
 
-        printf("%d: %d \n", i, frequencies[i]);
+        printf("%d: %d\n", i, frequencies[i]);
 
 
         temp_count += frequencies[i];
     }
 
-    printf("%llu \n", temp_count);
-    printf("Run time: %f \n", run_time);
+    if (!raw_output) {
+
+        if(temp_count == ((size_t) range_size * (size_t) range_size * (size_t) range_size)) {
+            printf("\nSUCCEEDED: Number of results matches with the expected number of results \n");
+        } else {
+            printf("\nFAILED: !Number of results do not matches with the expected number of results! \n");
+        }
+
+        printf("Run time: %f \n", run_time);
+    }
 
     free(results);
     free(frequencies);
